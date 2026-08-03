@@ -30,20 +30,44 @@ log = get_logger(__name__)
 
 
 class ProviderManager:
-    def __init__(self, settings: Settings):
-        self._quote_providers: list[Provider] = []
-        if settings.finnhub_api_key:
-            self._quote_providers.append(
-                FinnhubProvider(settings.finnhub_api_key, settings.finnhub_requests_per_minute)
-            )
-        if settings.alphavantage_api_key:
-            self._quote_providers.append(
-                AlphaVantageProvider(
-                    settings.alphavantage_api_key, settings.alphavantage_requests_per_minute
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        quote_providers: list[Provider] | None = None,
+        history_provider: Provider | None = None,
+    ):
+        """`quote_providers`/`history_provider` are test seams - real usage
+        (via `get_provider_manager()`) never passes them, letting this
+        constructor build the real Finnhub/Alpha Vantage/yfinance stack
+        from settings. Tests pass `FakeProvider` instances instead, so
+        preference-order/caching/fallback logic can be verified without a
+        network call, real or otherwise.
+        """
+        if quote_providers is not None:
+            self._quote_providers = quote_providers
+        else:
+            self._quote_providers = []
+            if settings.finnhub_api_key:
+                self._quote_providers.append(
+                    FinnhubProvider(
+                        settings.finnhub_api_key, settings.finnhub_requests_per_minute
+                    )
                 )
+            if settings.alphavantage_api_key:
+                self._quote_providers.append(
+                    AlphaVantageProvider(
+                        settings.alphavantage_api_key,
+                        settings.alphavantage_requests_per_minute,
+                    )
+                )
+            self._quote_providers.append(
+                YFinanceProvider(settings.yfinance_requests_per_minute)
             )
-        self._yfinance = YFinanceProvider(settings.yfinance_requests_per_minute)
-        self._quote_providers.append(self._yfinance)
+
+        self._history_provider = (
+            history_provider if history_provider is not None else self._quote_providers[-1]
+        )
 
         self._cache_seconds = settings.quote_cache_seconds
         self._cache: dict[str, tuple[Quote, float]] = {}
@@ -123,14 +147,23 @@ class ProviderManager:
     async def get_history(
         self, symbol: str, start: datetime, end: datetime
     ) -> list[HistoryBar]:
-        return await self._yfinance.get_history(symbol, start, end)
+        return await self._history_provider.get_history(symbol, start, end)
 
     async def get_current_bar(self, symbol: str) -> HistoryBar | None:
         """Real intraday OHLCV, used by the snapshot scheduler - see
         YFinanceProvider.get_current_bar's docstring for why this is
         yfinance-only rather than going through the quote preference order.
+
+        `get_current_bar` isn't part of the `Provider` protocol (only
+        yfinance has it - Finnhub/Alpha Vantage's free tiers don't give
+        the OHLC-for-current-session shape it needs), so this degrades to
+        `None` for any injected test double that doesn't implement it,
+        the same "no data, not a crash" contract as everything else here.
         """
-        return await self._yfinance.get_current_bar(symbol)
+        method = getattr(self._history_provider, "get_current_bar", None)
+        if method is None:
+            return None
+        return await method(symbol)
 
 
 @lru_cache
