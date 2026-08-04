@@ -1,5 +1,13 @@
 # marketdesk — status and next steps
 
+**STATUS (2026-08-04): feature-complete and deployed.** Everything this
+doc originally tracked as missing (Docker, CI, README, homelab compose
+wiring, live E2E test) is done - see the bottom of this file for what
+changed since the mid-build snapshot below. The section immediately
+following is kept as-is for its build history and the real-vs-assumed
+provider notes, which are still accurate and still worth reading before
+touching the provider abstraction.
+
 Written mid-build (2026-08-03) because a session usage limit was imminent.
 This is the authoritative "what's real vs not yet" doc until the pieces
 below are filled in — trust this over assumptions from the original request.
@@ -99,40 +107,51 @@ below are filled in — trust this over assumptions from the original request.
    isolation (pure functions, provider calls in a bare Python script), not
    through the actual HTTP layer with bearer auth in front of it.
 
-## Needs a decision (from you)
+## Needs a decision (from you) — RESOLVED
 
-- **No GitHub remote for this repo.** Same situation fantasy-edge was in —
-  I don't have `gh` authenticated and don't know the intended repo name.
-  Tell me the URL (or confirm `camptwright/marketdesk`) and I'll add it and
-  push, same as I did for fantasy-edge → `fantasy-probabilities`.
-- **`MARKETS_API_TOKEN`** needs to be generated (e.g. `openssl rand -hex
-  32`) and added to CT 110's `.env` — I can do this, just flagging it
-  hasn't happened yet.
+- ~~No GitHub remote for this repo~~ → `github.com/camptwright/marketdesk`,
+  pushed.
+- ~~`MARKETS_API_TOKEN` needs to be generated~~ → generated, in CT110's
+  `.env`, and subsequently rotated once during this session's secret-
+  exposure incident (see homelab CLAUDE.md's operational lessons if a
+  similar `docker compose config` dump ever happens again).
 
-## What I'll do next (in order), once resumed
+## What actually happened next (2026-08-04)
 
-1. Build the real runtime image (not just the migration draft) and run the
-   API for real against the live `markets` Postgres — curl every route.
-2. Write `tests/` (fake provider, portfolio math, rate-limit/cache) and
-   actually run `pytest`, not just write it.
-3. Finish the Dockerfile (it already has a `base` stage that works; just
-   needs to be confirmed as the final multi-stage non-root shape) + write
-   `.github/workflows/build.yml` (push `ghcr.io/camptwright/marketdesk:
-   latest` and `:sha-<sha>`, `permissions: packages: write`).
-4. Write README.md with the env var table, the compose block, and the
-   `postgres-init.sql` / one-time live-command instructions.
-5. Add the marketdesk service block to `homelab/docker-compose.yml`
-   and the `markets` role/db to `homelab/postgres-init.sql`.
-6. Deploy for real on CT 110, verify `docker compose ps` shows it healthy,
-   curl it through to confirm the deployed instance actually works (not
-   just a throwaway test container).
-7. Then move to the homelab-dashboard "stocks" tile (`/stocks` page) — not
-   started at all yet, see homelab-dashboard's own `NEXT-STEPS.md`.
-8. Then the Adjutant scaffold + markets sub-agent — also not started;
-   Adjutant does not exist as a codebase anywhere yet (confirmed absent
-   both locally and on GitHub under every plausible name), so this
-   requires building a minimal orchestrator/agent framework from scratch,
-   not just adding to an existing one. This is a large, separate
-   undertaking — see the main conversation for the full original spec
-   (SYSTEM.md conventions, tool tiers, schedule migrations, etc.) since
-   none of that exists in this repo.
+All 8 items above are done:
+
+1. **Live E2E test executed for real** against the running container -
+   every route (`/health`, auth 401s, watchlist CRUD, `/quotes` batch,
+   `/movers`, positions CRUD + `/portfolio/summary`, `/history` backfill,
+   deletes) confirmed working with real yfinance data.
+2. `tests/` written and passing: `FakeProvider`, provider preference
+   order/cache/degraded-fallback/batch behavior, portfolio math.
+3. **Dockerfile finalized** as a true multi-stage build (`uv` in a
+   `builder` stage, only the venv + app code in `runtime`, non-root
+   throughout) - verified on CT110: builds clean, runs as uid 1001,
+   scheduler starts, `/health` returns 200. `.github/workflows/build.yml`
+   runs `pytest` then pushes to `ghcr.io/camptwright/marketdesk`.
+4. README.md written: env var table, full API surface, scheduled jobs,
+   the homelab compose block, and the one-time Postgres setup steps.
+5. Compose block and `postgres-init.sql`'s `markets` user/database added
+   to the homelab repo; `MARKETS_DB_PASSWORD`/`MARKETS_API_TOKEN`/
+   `FINNHUB_API_KEY`/`ALPHAVANTAGE_API_KEY` added to `env.example`.
+6. **Deployed for real on CT110** as the actual `marketdesk` compose
+   service (not a throwaway container) - `docker compose config` parses
+   clean with `core,apps` profiles, the real service is healthy, and it's
+   the one Adjutant's markets agent pulled real watchlist/portfolio/quote
+   data from during that repo's own end-to-end verification.
+7. The homelab-dashboard "stocks" tile is built and deployed - see that
+   repo's `NEXT-STEPS.md`.
+8. Adjutant exists (`github.com/camptwright/adjutant`) with a markets
+   sub-agent that reads this API read-only and posts briefs back to the
+   dashboard - see that repo's own README/NEXT-STEPS for its shape.
+
+One thing worth knowing for next time: the GHCR package's visibility
+was never explicitly confirmed public - the CT110 deployment above was
+built directly from source on the LXC (same workaround dashboard needed
+originally) because `docker pull ghcr.io/camptwright/marketdesk:latest`
+returned `unauthorized` and the `gh auth refresh` needed to check/fix
+package visibility timed out waiting on browser confirmation in this
+non-interactive session. Worth revisiting before relying on a plain
+`docker compose pull && up -d marketdesk` on a future redeploy.
