@@ -31,11 +31,5 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: "no"
-  cloudflared:
-    image: cloudflare/cloudflared:latest@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
-    command: ["tunnel", "--no-autoupdate", "run"]
-    environment: {TUNNEL_TOKEN: "${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN}"}
-    depends_on: [app]
-    restart: unless-stopped
 volumes:
   postgres:
