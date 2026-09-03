@@ -14,6 +14,7 @@ services:
       timeout: 5s
       retries: 6
     restart: unless-stopped
+    mem_limit: 512m
   app:
     build: .
     env_file: .env
@@ -24,6 +25,7 @@ services:
       migrate: {condition: service_completed_successfully}
     expose: ["8000"]
     restart: unless-stopped
+    mem_limit: 384m
   migrate:
     build: .
     command: ["alembic", "upgrade", "head"]
@@ -31,5 +33,6 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     restart: "no"
+    mem_limit: 256m
 volumes:
   postgres:
